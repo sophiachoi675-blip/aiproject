@@ -1,13 +1,15 @@
 
 from pathlib import Path
-import datetime
 
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
 
 
-# 페이지 설정
+# --------------------------------
+# 1. 페이지 설정
+# --------------------------------
+
 st.set_page_config(
     page_title="월별 기온 분석",
     page_icon="🌡️",
@@ -15,33 +17,47 @@ st.set_page_config(
 )
 
 st.title("🌡️ 월별 기온 분석")
-st.write("원하는 월을 선택하면 전체 연도의 최고기온과 최저기온을 비교할 수 있습니다.")
+st.write("월을 선택하여 전체 연도의 최고기온과 최저기온을 비교해 보세요.")
 
 
-# CSV 데이터 불러오기
+# --------------------------------
+# 2. CSV 파일 불러오기
+# --------------------------------
+
 @st.cache_data
 def load_data():
 
-    file_path = Path(__file__).resolve().parent / "temperature.csv"
+    # pages 폴더의 상위 폴더에서 CSV 파일 찾기
+    file_path = (
+        Path(__file__).resolve().parent.parent
+        / "temperature.csv"
+    )
 
     if not file_path.exists():
-        st.error("temperature.csv 파일을 찾을 수 없습니다.")
-        st.stop()
+        raise FileNotFoundError(
+            "상위 폴더에서 temperature.csv 파일을 찾을 수 없습니다."
+        )
 
     # 한글 인코딩 처리
     encodings = ["cp949", "euc-kr", "utf-8-sig", "utf-8"]
+
     df = None
 
     for encoding in encodings:
         try:
-            df = pd.read_csv(file_path, encoding=encoding)
+            df = pd.read_csv(
+                file_path,
+                encoding=encoding
+            )
             break
+
         except UnicodeDecodeError:
             continue
 
     if df is None:
-        raise ValueError("CSV 파일 인코딩을 확인해주세요.")
+        raise ValueError("CSV 파일의 인코딩을 확인해주세요.")
 
+    # 컬럼명 공백 제거
     df.columns = df.columns.astype(str).str.strip()
 
     # 필요한 컬럼 확인
@@ -53,62 +69,63 @@ def load_data():
 
     for col in required_columns:
         if col not in df.columns:
-            raise ValueError(f"{col} 컬럼이 없습니다.")
+            raise ValueError(
+                f"CSV 파일에 {col} 컬럼이 없습니다."
+            )
 
-    # 기온을 숫자로 변환
+    # 기온 데이터를 숫자로 변환
     for col in ["최고기온(℃)", "최저기온(℃)"]:
         df[col] = pd.to_numeric(
             df[col],
             errors="coerce"
         )
 
+    # 영문 월 이름을 숫자로 변환
+    month_dict = {
+        "Jan": 1,
+        "Feb": 2,
+        "Mar": 3,
+        "Apr": 4,
+        "May": 5,
+        "Jun": 6,
+        "Jul": 7,
+        "Aug": 8,
+        "Sep": 9,
+        "Oct": 10,
+        "Nov": 11,
+        "Dec": 12
+    }
+
     # 연도와 월 추출
-    # 두 자리 연도의 세기 변화를 행 순서로 복원
-    month_numbers = []
-    full_years = []
+    date_parts = (
+        df["일시"]
+        .astype(str)
+        .str.strip()
+        .str.split("-", expand=True)
+    )
 
-    century = 1900
-    previous_short_year = None
+    df["월"] = date_parts[0].str.title().map(month_dict)
 
-    for value in df["일시"].astype(str).str.strip():
+    # 현재 데이터의 두 자리 연도는 2007~2026년
+    df["연도"] = pd.to_numeric(
+        date_parts[1],
+        errors="coerce"
+    ) + 2000
 
-        try:
-            month_text, short_year_text = value.split("-")
-
-            month_number = datetime.datetime.strptime(
-                month_text.title(), "%b"
-            ).month
-
-            short_year = int(short_year_text)
-
-            if (
-                previous_short_year is not None
-                and short_year < previous_short_year
-            ):
-                century += 100
-
-            full_year = century + short_year
-
-            month_numbers.append(month_number)
-            full_years.append(full_year)
-
-            previous_short_year = short_year
-
-        except (ValueError, TypeError):
-            month_numbers.append(None)
-            full_years.append(None)
-
-    df["월"] = month_numbers
-    df["연도"] = full_years
-
-    df = df.dropna(subset=["연도", "월"])
+    # 잘못된 날짜 및 결측 연도 제거
+    df = df.dropna(
+        subset=["연도", "월"]
+    )
 
     df["연도"] = df["연도"].astype(int)
     df["월"] = df["월"].astype(int)
 
-    # 연도와 월별 데이터 정리
+    # 같은 연도와 월에 데이터가 여러 개라면 평균 계산
     df = (
-        df.groupby(["연도", "월"], as_index=False)[
+        df.groupby(
+            ["연도", "월"],
+            as_index=False
+        )[
             ["최고기온(℃)", "최저기온(℃)"]
         ]
         .mean()
@@ -118,24 +135,35 @@ def load_data():
     return df
 
 
-# 데이터 불러오기
+# --------------------------------
+# 3. 데이터 실행
+# --------------------------------
+
 try:
     df = load_data()
 
-except Exception as error:
-    st.error(f"데이터 오류: {error}")
+except Exception as e:
+    st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
     st.stop()
 
 
-# 월 선택
+# --------------------------------
+# 4. 월 선택
+# --------------------------------
+
+st.subheader("📅 분석할 월 선택")
+
 selected_month = st.selectbox(
-    "분석할 월을 선택하세요.",
+    "월을 선택하세요.",
     options=list(range(1, 13)),
-    format_func=lambda month: f"{month}월"
+    format_func=lambda x: f"{x}월"
 )
 
 
-# 선택한 월의 데이터 추출
+# --------------------------------
+# 5. 선택한 월 데이터 추출
+# --------------------------------
+
 month_df = df[
     df["월"] == selected_month
 ].copy()
@@ -143,7 +171,10 @@ month_df = df[
 month_df = month_df.sort_values("연도")
 
 
-# 그래프 생성
+# --------------------------------
+# 6. 그래프 생성
+# --------------------------------
+
 if month_df.empty:
 
     st.warning("선택한 월의 데이터가 없습니다.")
@@ -152,7 +183,7 @@ else:
 
     fig = go.Figure()
 
-    # 최고기온 그래프 - 핫핑크
+    # 최고기온 - 핫핑크
     fig.add_trace(
         go.Scatter(
             x=month_df["연도"],
@@ -165,13 +196,12 @@ else:
             ),
             marker=dict(
                 color="#FF69B4",
-                size=7
-            ),
-            connectgaps=False
+                size=8
+            )
         )
     )
 
-    # 최저기온 그래프 - 하늘색
+    # 최저기온 - 하늘색
     fig.add_trace(
         go.Scatter(
             x=month_df["연도"],
@@ -184,60 +214,90 @@ else:
             ),
             marker=dict(
                 color="#87CEEB",
-                size=7
-            ),
-            connectgaps=False
+                size=8
+            )
         )
     )
 
-    # 그래프 제목과 축 설정
+    # 그래프 제목 및 설정
     fig.update_layout(
-        title={
-            "text": "월별 기온 분석",
-            "x": 0.5,
-            "xanchor": "center"
-        },
+
+        title=dict(
+            text="월별 기온 분석",
+            x=0.5,
+            xanchor="center",
+            font=dict(size=25)
+        ),
 
         xaxis_title="연도",
         yaxis_title="온도(℃)",
 
-        legend_title="범례",
+        legend=dict(
+            title="범례",
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5
+        ),
+
         hovermode="x unified",
 
         template="plotly_white",
+
         height=600,
 
-        margin=dict(
-            l=40,
-            r=40,
-            t=80,
-            b=50
-        )
+        font=dict(size=14)
     )
 
-    fig.update_xaxes(dtick=5)
+    fig.update_xaxes(
+        title_font=dict(size=16),
+        tickmode="linear",
+        dtick=2
+    )
 
-    # 그래프 출력
+    fig.update_yaxes(
+        title_font=dict(size=16),
+        showgrid=True,
+        zeroline=True
+    )
+
+    # Streamlit 그래프 출력
     st.plotly_chart(
         fig,
         use_container_width=True
     )
 
-    st.caption(
-        f"선택한 월: {selected_month}월 | "
-        f"데이터 연도: {month_df['연도'].min()}년 ~ "
-        f"{month_df['연도'].max()}년"
-    )
 
-    # 데이터 표 확인
-    with st.expander("그래프에 사용된 데이터 보기"):
+    # --------------------------------
+    # 7. 분석 데이터 표시
+    # --------------------------------
 
-        display_df = month_df[
-            ["연도", "최고기온(℃)", "최저기온(℃)"]
-        ]
+    st.subheader("📊 선택한 월의 기온 데이터")
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.metric(
+            "최고기온",
+            f"{month_df['최고기온(℃)'].max():.1f}℃"
+        )
+
+    with col2:
+        st.metric(
+            "최저기온",
+            f"{month_df['최저기온(℃)'].min():.1f}℃"
+        )
+
+    # 데이터 표
+    with st.expander("상세 데이터 확인하기"):
 
         st.dataframe(
-            display_df,
+            month_df[
+                ["연도", "최고기온(℃)", "최저기온(℃)"]
+            ],
             use_container_width=True,
             hide_index=True
         )
+
+
