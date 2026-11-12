@@ -36,7 +36,9 @@ st.divider()
 
 @st.cache_data
 def load_data():
-    file_path = Path(__file__).parent / "csv.csv"
+
+    # 현재 app.py가 있는 pages 폴더의 상위 폴더
+    file_path = Path(__file__).resolve().parent.parent / "csv.csv"
 
     try:
         df = pd.read_csv(file_path, encoding="cp949")
@@ -57,8 +59,12 @@ try:
 
     df = df.dropna(subset=required_columns).copy()
 
+    if df.empty:
+        st.error("분석할 데이터가 없습니다.")
+        st.stop()
+
 except FileNotFoundError:
-    st.error("csv.csv 파일을 찾을 수 없습니다.")
+    st.error("상위 폴더에서 csv.csv 파일을 찾을 수 없습니다.")
     st.stop()
 
 except Exception as e:
@@ -72,6 +78,10 @@ except Exception as e:
 
 X = df[["꽃잎길이", "꽃잎너비"]]
 y = df["품종"]
+
+if y.nunique() < 2:
+    st.error("분류를 위해서는 최소 2개 이상의 품종이 필요합니다.")
+    st.stop()
 
 # 학습 데이터와 테스트 데이터 분리
 X_train, X_test, y_train, y_test = train_test_split(
@@ -196,13 +206,8 @@ st.metric(
     f"{best_probability * 100:.1f}%"
 )
 
-st.write(
-    f"입력한 꽃잎길이: **{petal_length} cm**"
-)
-
-st.write(
-    f"입력한 꽃잎너비: **{petal_width} cm**"
-)
+st.write(f"입력한 꽃잎길이: **{petal_length} cm**")
+st.write(f"입력한 꽃잎너비: **{petal_width} cm**")
 
 
 # ---------------------------------
@@ -223,11 +228,6 @@ st.bar_chart(
     color="#42A5F5"
 )
 
-st.caption(
-    "예측 확률은 랜덤 포레스트의 여러 나무가 "
-    "계산한 품종별 확률을 종합한 값입니다."
-)
-
 
 # ---------------------------------
 # 9. 그래프 시각화
@@ -238,12 +238,10 @@ st.divider()
 st.subheader("📈 꽃잎 크기별 품종 분류 시각화")
 
 st.write(
-    "그래프에서 초록색 별은 사용자가 입력한 값입니다. "
-    "배경색은 AI가 해당 위치를 어떤 품종으로 "
-    "분류하는지 보여줍니다."
+    "초록색 별은 사용자가 입력한 값이며, "
+    "배경색은 AI가 분류한 품종 영역입니다."
 )
 
-# 품종별 색상
 colors = {
     "Iris-setosa": "#4285F4",
     "Iris-versicolor": "#FF9800",
@@ -270,7 +268,6 @@ grid_data = pd.DataFrame({
 
 Z = model.predict(grid_data)
 
-# 품종을 숫자로 변환
 class_to_num = {
     name: i for i, name in enumerate(model.classes_)
 }
@@ -279,14 +276,12 @@ Z_num = np.array([
     class_to_num[value] for value in Z
 ]).reshape(xx.shape)
 
-# 배경색
 cmap_background = ListedColormap([
     "#DCEBFA",
     "#FFE8C7",
     "#EBDCF8"
 ])
 
-# 그래프 그리기
 fig, ax = plt.subplots(figsize=(11, 7))
 
 # AI 분류 영역
@@ -317,7 +312,7 @@ for species in model.classes_:
     ax.scatter(
         subset["꽃잎길이"],
         subset["꽃잎너비"],
-        color=colors[species],
+        color=colors.get(species, "#808080"),
         label=name_dict.get(species, species),
         s=55,
         alpha=0.8,
@@ -337,7 +332,6 @@ ax.scatter(
     zorder=10
 )
 
-# 입력 위치에 주석 표시
 ax.annotate(
     f"입력값 ({petal_length}, {petal_width})",
     (petal_length, petal_width),
@@ -372,29 +366,27 @@ st.divider()
 st.subheader("🔍 AI가 이 품종으로 예측한 이유")
 
 st.write(
-    f"사용자가 입력한 꽃잎길이는 **{petal_length}cm**, "
-    f"꽃잎너비는 **{petal_width}cm**입니다."
+    f"사용자가 입력한 꽃잎길이는 {petal_length}cm, "
+    f"꽃잎너비는 {petal_width}cm입니다."
 )
 
 st.write(
-    f"랜덤 포레스트 모델은 이 두 가지 특징을 "
-    f"학습 데이터의 품종별 패턴과 비교했습니다."
+    f"AI는 두 가지 특징을 학습 데이터의 "
+    f"품종별 패턴과 비교했습니다."
 )
 
 st.write(
-    f"그 결과 **{predicted_name}** 의 예측 확률이 "
+    f"그 결과 {predicted_name}의 예측 확률이 "
     f"가장 높게 나타났습니다."
 )
 
-# 나무별 예측 결과 집계
+# 의사결정나무별 예측 결과
 tree_predictions = np.array([
     tree.predict(input_data)[0]
     for tree in model.estimators_
 ])
 
-vote_counts = pd.Series(
-    tree_predictions
-).value_counts()
+vote_counts = pd.Series(tree_predictions).value_counts()
 
 vote_df = pd.DataFrame({
     "품종": [
@@ -407,7 +399,7 @@ vote_df = pd.DataFrame({
     ]
 })
 
-st.write("**🌳 200개 의사결정나무의 개별 예측 결과**")
+st.write("🌳 200개 의사결정나무의 개별 예측 결과")
 
 st.dataframe(
     vote_df,
@@ -416,17 +408,16 @@ st.dataframe(
 )
 
 st.info(
-    "초록색 별이 위치한 곳의 배경색은 AI가 "
-    "해당 위치를 분류한 영역입니다. "
-    "또한 여러 의사결정나무의 예측 결과와 "
-    "품종별 확률을 함께 확인하면 "
-    "AI가 해당 품종을 선택한 이유를 이해할 수 있습니다."
+    "초록색 별이 위치한 배경색은 AI의 분류 영역을 "
+    "나타냅니다. 예측 확률과 나무별 투표 결과를 "
+    "함께 확인하면 분류 결과를 더 잘 이해할 수 있습니다."
 )
 
 st.divider()
 
 st.caption(
-    "본 프로그램은 Iris 데이터와 랜덤 포레스트 "
-    "알고리즘을 이용한 머신러닝 품종 분류 프로그램입니다."
+    "Iris 데이터와 Random Forest 알고리즘을 활용한 "
+    "머신러닝 품종 분류 프로그램입니다."
 )
+
 
