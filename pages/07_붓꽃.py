@@ -38,7 +38,7 @@ st.divider()
 def load_data():
 
     # 현재 app.py가 있는 pages 폴더의 상위 폴더
-    file_path = Path(__file__).resolve().parent.parent / "csv.csv"
+    file_path = Path(__file__).resolve().parent.parent / "iris.csv"
 
     try:
         df = pd.read_csv(file_path, encoding="cp949")
