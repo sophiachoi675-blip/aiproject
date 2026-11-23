@@ -10,7 +10,7 @@ from pathlib import Path
 
 st.set_page_config(
     page_title="지역별 범죄 통계 분석",
-    page_icon="📊",
+    page_icon="🚨",
     layout="wide"
 )
 
@@ -30,13 +30,13 @@ CSV_FILE = BASE_DIR / "경찰청_범죄 발생 지역별 통계_20251231.csv"
 @st.cache_data
 def load_data():
 
-    # CSV 인코딩 처리
     try:
         df = pd.read_csv(CSV_FILE, encoding="cp949")
     except UnicodeDecodeError:
         df = pd.read_csv(CSV_FILE, encoding="utf-8-sig")
 
-    # 숫자 데이터 변환
+    df.columns = df.columns.str.strip()
+
     for col in df.columns[2:]:
         df[col] = pd.to_numeric(
             df[col], errors="coerce"
@@ -50,7 +50,6 @@ try:
 
 except FileNotFoundError:
     st.error("CSV 파일을 찾을 수 없습니다.")
-    st.info("CSV 파일이 상위 폴더에 있는지 확인해 주세요.")
     st.stop()
 
 except Exception as e:
@@ -68,9 +67,16 @@ if not all(col in df.columns for col in required_columns):
     st.error("CSV 파일의 범죄 분류 열을 확인해 주세요.")
     st.stop()
 
+# 기존 지역 선택 기능 유지
 region_columns = df.columns[2:].tolist()
 
-if not region_columns:
+# 전국 순위에서는 외국 국적 항목 제외
+domestic_regions = [
+    col for col in region_columns
+    if not col.startswith("외국 ")
+]
+
+if not region_columns or not domestic_regions:
     st.error("지역 데이터가 없습니다.")
     st.stop()
 
@@ -115,12 +121,11 @@ with col2:
 
 
 # --------------------------------
-# 7. 데이터 분석
+# 7. 선택 지역 데이터 분석
 # --------------------------------
 
 if selected_category == "전체 범죄대분류":
 
-    # 대분류별 합계
     crime_data = df.groupby(
         "범죄대분류",
         as_index=False
@@ -137,7 +142,6 @@ if selected_category == "전체 범죄대분류":
 
 else:
 
-    # 선택한 대분류에 해당하는 세부 범죄만 추출
     filtered_df = df[
         df["범죄대분류"] == selected_category
     ]
@@ -175,7 +179,6 @@ crime_data["비율"] = (
     crime_data["발생건수"] / total_crimes * 100
 )
 
-# 발생 건수 순으로 정렬
 crime_data = crime_data.sort_values(
     "발생건수",
     ascending=False
@@ -216,9 +219,6 @@ st.divider()
 # 10. 그래프 색상 설정
 # --------------------------------
 
-# 1위는 빨간색
-# 나머지는 파란색 그라데이션
-
 blue_gradient = [
     "#2563EB",
     "#3B82F6",
@@ -239,13 +239,11 @@ for i in range(1, len(crime_data)):
         len(blue_gradient) - 1
     )
 
-    colors.append(
-        blue_gradient[color_index]
-    )
+    colors.append(blue_gradient[color_index])
 
 
 # --------------------------------
-# 11. 가로 막대그래프
+# 11. 기존 범죄 비율 그래프
 # --------------------------------
 
 st.subheader(f"📊 {analysis_title}")
@@ -283,8 +281,6 @@ fig.add_trace(
     )
 )
 
-
-# 그래프 디자인
 fig.update_layout(
     template="plotly_white",
 
@@ -302,7 +298,6 @@ fig.update_layout(
     yaxis_title="범죄 종류",
 
     showlegend=False,
-
     bargap=0.35,
 
     margin=dict(
@@ -331,8 +326,6 @@ fig.update_yaxes(
     showgrid=False
 )
 
-
-# Streamlit 그래프 출력
 st.plotly_chart(
     fig,
     use_container_width=True
@@ -340,7 +333,217 @@ st.plotly_chart(
 
 
 # --------------------------------
-# 12. 상세 데이터 표
+# 12. 기존 범죄 발생 순위 TOP 5
+# --------------------------------
+
+st.divider()
+
+st.subheader("🏆 범죄 발생 순위 TOP 5")
+
+top5 = crime_data.head(5).copy()
+
+top5_display = top5[
+    ["순위", "범죄종류", "발생건수", "비율"]
+].copy()
+
+top5_display["발생건수"] = top5_display[
+    "발생건수"
+].map(lambda x: f"{x:,.0f}건")
+
+top5_display["비율"] = top5_display[
+    "비율"
+].map(lambda x: f"{x:.2f}%")
+
+st.dataframe(
+    top5_display,
+    use_container_width=True,
+    hide_index=True
+)
+
+
+# --------------------------------
+# 13. 전국 지역별 범죄 발생 TOP 10
+# --------------------------------
+
+st.divider()
+
+st.subheader("🌎 전국 지역별 범죄 발생 TOP 10")
+
+# 선택한 범죄 종류에 따라 전국 발생 건수 계산
+
+if selected_category == "전체 범죄대분류":
+
+    ranking_series = df[
+        domestic_regions
+    ].sum()
+
+else:
+
+    ranking_series = df[
+        df["범죄대분류"] == selected_category
+    ][domestic_regions].sum()
+
+
+# 지역별 발생 건수 정렬
+ranking_series = ranking_series.sort_values(
+    ascending=False
+)
+
+ranking_data = ranking_series.head(10).reset_index()
+
+ranking_data.columns = [
+    "지역",
+    "발생건수"
+]
+
+ranking_data["순위"] = range(
+    1, len(ranking_data) + 1
+)
+
+
+# TOP 10 색상 설정
+rank_colors = ["#EF4444"]
+
+rank_blue = [
+    "#2563EB",
+    "#3B82F6",
+    "#60A5FA",
+    "#7CB5F8",
+    "#93C5FD",
+    "#B0D0FC",
+    "#BFDBFE",
+    "#D3E5FF",
+    "#DBEAFE"
+]
+
+for i in range(1, len(ranking_data)):
+    rank_colors.append(
+        rank_blue[min(i - 1, len(rank_blue) - 1)]
+    )
+
+
+# 전국 순위 그래프
+rank_fig = go.Figure()
+
+rank_fig.add_trace(
+    go.Bar(
+        x=ranking_data["발생건수"],
+        y=ranking_data["지역"],
+        orientation="h",
+
+        marker_color=rank_colors,
+
+        text=[
+            f"{v:,.0f}건"
+            for v in ranking_data["발생건수"]
+        ],
+
+        textposition="outside",
+
+        hovertemplate=
+        "<b>%{y}</b><br>" +
+        "발생 건수: %{x:,.0f}건" +
+        "<extra></extra>"
+    )
+)
+
+rank_fig.update_layout(
+    template="plotly_white",
+
+    title="전국 지역별 범죄 발생 건수 순위",
+
+    height=520,
+
+    xaxis_title="범죄 발생 건수",
+    yaxis_title="지역",
+
+    showlegend=False,
+
+    margin=dict(
+        l=30,
+        r=90,
+        t=70,
+        b=50
+    )
+)
+
+rank_fig.update_yaxes(
+    autorange="reversed",
+    showgrid=False
+)
+
+rank_fig.update_xaxes(
+    showgrid=True,
+    gridcolor="#EEEEEE"
+)
+
+st.plotly_chart(
+    rank_fig,
+    use_container_width=True
+)
+
+
+# --------------------------------
+# 14. 데이터 분석 의미 (최대 3줄)
+# --------------------------------
+
+st.divider()
+
+st.subheader("💡 데이터 분석 의미")
+
+# 전국 1위 지역
+top_region = ranking_data.iloc[0]["지역"]
+top_region_count = ranking_data.iloc[0]["발생건수"]
+
+# 선택 지역의 전국 순위
+selected_region_rank = (
+    ranking_series.rank(
+        ascending=False,
+        method="min"
+    )
+)
+
+# 선택 지역의 가장 많이 발생한 범죄
+top_crime = crime_data.iloc[0]["범죄종류"]
+top_crime_count = crime_data.iloc[0]["발생건수"]
+top_crime_ratio = crime_data.iloc[0]["비율"]
+
+# 분석 문장 생성
+insights = []
+
+insights.append(
+    f"① 전국에서 범죄 발생 건수가 가장 많은 지역은 "
+    f"**{top_region}**이며, 총 **{top_region_count:,.0f}건**입니다."
+)
+
+if selected_region in domestic_regions:
+
+    region_rank = int(
+        selected_region_rank[selected_region]
+    )
+
+    insights.append(
+        f"② **{selected_region}**은 전국 지역 중 "
+        f"범죄 발생 건수 **{region_rank}위**입니다."
+    )
+
+else:
+
+    insights.append(
+        f"② 외국 국적별 통계는 국내 지역 순위에서 제외됩니다."
+    )
+
+insights.append(
+    f"③ {selected_region}에서 가장 많이 발생한 범죄는 "
+    f"**{top_crime}**이며, 선택한 분석 범위의 "
+    f"**{top_crime_ratio:.2f}%**를 차지합니다."
+)
+
+st.info("\n\n".join(insights))
+
+
+# --------------------------------
+# 15. 기존 상세 데이터 표
 # --------------------------------
 
 st.divider()
@@ -359,7 +562,6 @@ display_data["비율"] = display_data[
     "비율"
 ].map(lambda x: f"{x:.2f}%")
 
-
 st.dataframe(
     display_data,
     use_container_width=True,
@@ -368,8 +570,10 @@ st.dataframe(
 
 
 # --------------------------------
-# 13. CSV 다운로드
+# 16. 기존 CSV 다운로드
 # --------------------------------
+
+st.divider()
 
 download_data = crime_data[
     ["순위", "범죄종류", "발생건수", "비율"]
@@ -389,7 +593,7 @@ st.download_button(
 
 
 # --------------------------------
-# 14. 안내 문구
+# 17. 안내 문구
 # --------------------------------
 
 st.divider()
@@ -399,6 +603,6 @@ st.caption(
 )
 
 st.caption(
-    "※ 비율은 선택한 지역 및 분석 범위의 전체 범죄 발생 건수를 "
-    "기준으로 계산한 구성비입니다. 인구 대비 범죄율과는 다릅니다."
+    "※ 범죄 발생 건수는 인구 규모를 반영하지 않은 단순 집계입니다. "
+    "지역별 안전도나 인구 대비 범죄 위험도를 의미하지 않습니다."
 )
